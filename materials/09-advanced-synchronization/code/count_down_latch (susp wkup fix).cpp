@@ -6,8 +6,8 @@ void countdownlatch::await(uint64_t nanosecs) {
     std::unique_lock<std::mutex> lck(lock);
     if (0 == count) {
         return;
-    }
-    if (nanosecs > 0) {
+    } //открыть cppreference и прочитать про wait_for. в wait/wait_for можно сунуть ф-ю в кач-ве арг-та
+    if (nanosecs > 0) { //есть еще wait_until - ему дают абс точку во времени (now+nanosecs), но этот метод немножко дороже
         cv.wait_for(lck, std::chrono::nanoseconds(nanosecs));
     } else {
         cv.wait(lck); //тут есть баг - не обрабатывается suspicious wakeup (может проснуца? а должен спать вечно. надо тут пилить цикл while)

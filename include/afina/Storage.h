@@ -34,9 +34,9 @@ public:
      * Stores association between given key/value pair if key isn't present in
      * storage.
      *
-     * If given key is already present in the storage then method resturns false
+     * If given key is already present in the storage then method returns false
      * and doesn't change anything inside. Otherwise new association key->value
-     * created and if successfull then true returns.
+     * created and if successful then true returns.
      *
      * @param key to be associated with value
      * @param value to be assigned for the key
@@ -83,7 +83,7 @@ public:
      * @param key to retrive1 value for
      * @param value output parameter to copy value to
      */
-    virtual bool Get(const std::string &key, std::string &value) const = 0;
+    virtual bool Get(const std::string &key, std::string &value) = 0;
 };
 
 } // namespace Afina
