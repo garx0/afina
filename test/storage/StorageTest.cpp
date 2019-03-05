@@ -12,11 +12,8 @@
 
 #include "storage/SimpleLRU.h"
 
-//#include <logging/ServiceImpl.h> //
-
 using namespace Afina::Backend;
 using namespace Afina::Execute;
-//using namespace Afina::Logging; //
 using namespace std;
 
 TEST(StorageTest, PutGet) {

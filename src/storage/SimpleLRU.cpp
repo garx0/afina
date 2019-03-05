@@ -4,31 +4,6 @@
 namespace Afina {
 namespace Backend {
 
-void SimpleLRU::_PrintDebug(std::ostream& os) {
-    os << "\tindex:\n";
-    for(auto& pair: _lru_index) {
-        os << "(" << pair.first.get() << ")\n";
-    }
-    os << "\t</index>\n";
-    lru_node* tmp = _lru_head.get();
-    os << "\tLIST:" << "\n";
-    while(tmp!=nullptr) {
-        os << tmp->key << " " << tmp->value << " " <<
-                     ((tmp->next!=nullptr) ? "_" : "0") << " " <<
-                     ((tmp->prev!=nullptr) ? "_" : "0") << " //\n";
-        tmp = tmp->next.get();
-    }
-    os << "  REVERSE:" << "\n";
-    tmp = _lru_tail;
-    while(tmp!=nullptr) {
-        os << tmp->key << " " << tmp->value << " " <<
-                     ((tmp->next!=nullptr) ? "_" : "0") << " " <<
-                     ((tmp->prev!=nullptr) ? "_" : "0") << " \\\\\n";
-        tmp = tmp->prev;
-    }
-    os << "\t</LIST>" << "\n";
-}
-
 bool SimpleLRU::_ReduceToSize(std::size_t size) {
     while(_size > size) {
         _DeleteFromTail();
@@ -191,6 +166,31 @@ bool SimpleLRU::Get(const std::string &key, std::string &value) {
     _MoveToHead(ref);
     value = ref.get().value;
     return true;
+}
+
+void SimpleLRU::_PrintDebug(std::ostream& os) {
+    os << "\tindex:\n";
+    for(auto& pair: _lru_index) {
+        os << "(" << pair.first.get() << ")\n";
+    }
+    os << "\t</index>\n";
+    lru_node* tmp = _lru_head.get();
+    os << "\tLIST:" << "\n";
+    while(tmp!=nullptr) {
+        os << tmp->key << " " << tmp->value << " " <<
+                     ((tmp->next!=nullptr) ? "_" : "0") << " " <<
+                     ((tmp->prev!=nullptr) ? "_" : "0") << " //\n";
+        tmp = tmp->next.get();
+    }
+    os << "  REVERSE:" << "\n";
+    tmp = _lru_tail;
+    while(tmp!=nullptr) {
+        os << tmp->key << " " << tmp->value << " " <<
+                     ((tmp->next!=nullptr) ? "_" : "0") << " " <<
+                     ((tmp->prev!=nullptr) ? "_" : "0") << " \\\\\n";
+        tmp = tmp->prev;
+    }
+    os << "\t</LIST>" << "\n";
 }
 
 } // namespace Backend

@@ -21,8 +21,6 @@ public:
         : _max_size(max_size), _size(0), _lru_head(nullptr), _lru_tail(nullptr) {}
 
     ~SimpleLRU() override {
-//        _lru_index.clear();
-//        _lru_head.reset(); // TODO: Here is stack overflow
         _ReduceToSize(0);
     }
 
