@@ -20,7 +20,7 @@ bool SimpleLRU::_DeleteFromTail() {
     lru_node* new_tail = tmp->prev;
     const std::string &del_key = tmp->key;
     auto found = _lru_index.find(del_key);
-    if(del_key == _lru_head->key) {
+    if(_lru_tail == _lru_head.get()) {
         delete _lru_head.release();
     } else {
         delete tmp->prev->next.release();
