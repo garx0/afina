@@ -4,17 +4,24 @@
 namespace Afina {
 namespace Backend {
 
-bool SimpleLRU::_ReduceToSize(std::size_t size) {
+void SimpleLRU::_Clear() {
+    _lru_index.clear();
+    delete _lru_head.release();
+    _lru_tail = nullptr;
+    _size = 0;
+}
+
+void SimpleLRU::_ReduceToSize(std::size_t size) {
+    if(size == 0) {
+        _Clear();
+        return;
+    }
     while(_size > size) {
         _DeleteFromTail();
     }
-    return true;
 }
 
-bool SimpleLRU::_DeleteFromTail() {
-    if(_lru_index.empty()) {
-        return false;
-    }
+void SimpleLRU::_DeleteFromTail() {
     lru_node* tmp = _lru_tail;
     std::size_t del_size = tmp->key.size() + tmp->value.size();
     lru_node* new_tail = tmp->prev;
@@ -31,64 +38,37 @@ bool SimpleLRU::_DeleteFromTail() {
     if(_lru_tail != nullptr) {
         _lru_tail->next = nullptr;
     }
-    return true;
 }
 
-bool SimpleLRU::_MoveToHead(std::reference_wrapper<lru_node> ref) {
-    if(_lru_head.get() == &ref.get()) {
-        return true;
+void SimpleLRU::_MoveToHead(std::reference_wrapper<lru_node> ref) {
+    lru_node& node = ref.get();
+    if(_lru_head.get() == &node) {
+        return;
     }
-    if(_lru_tail == &ref.get()) {
+    if(_lru_tail == &node) {
         // our element is in tail, and tail != head
-        _lru_head->prev = &ref.get();
-        _lru_tail = ref.get().prev;
-        ref.get().prev->next.swap(ref.get().next);
-        ref.get().next.swap(_lru_head);
+        _lru_head->prev = &node;
+        _lru_tail = node.prev;
+        node.prev->next.swap(node.next);
+        node.next.swap(_lru_head);
     } else {
         // our element is not in head or tail
-        _lru_head->prev = &ref.get();
-        ref.get().next->prev = ref.get().prev;
-        ref.get().prev->next.swap(ref.get().next);
-        ref.get().next.swap(_lru_head);
+        _lru_head->prev = &node;
+        node.next->prev = node.prev;
+        node.prev->next.swap(node.next);
+        node.next.swap(_lru_head);
     }
     _lru_head->prev = nullptr;
-    return true;
 }
 
-// See MapBasedGlobalLockImpl.h
-bool SimpleLRU::Put(const std::string &key, const std::string &value) {
-    if(key.size() + value.size() > _max_size) {
-        return false;
-    }
-    if(PutIfAbsent(key, value)) {
-        return true;
-    }
-    std::reference_wrapper<lru_node> ref = _lru_index.find(key)->second;
-    std::size_t size_inc = value.size() - ref.get().value.size();
-    _ReduceToSize(_max_size - size_inc);
-    _lru_head->value = value;
-    _size += size_inc;
-    return true;
-}
-
-// See MapBasedGlobalLockImpl.h
-bool SimpleLRU::PutIfAbsent(const std::string &key, const std::string &value) {
+bool SimpleLRU::_PutNew(const std::string &key, const std::string &value) {
     std::size_t entry_size = key.size() + value.size();
     if(entry_size > _max_size) {
         return false;
     }
-    bool empty = _lru_index.empty();
-    if(!empty) {
-        if(_lru_index.find(key) != _lru_index.end()) {
-            return false;
-        }
-    }
     lru_node* node = new lru_node{key, value, nullptr, nullptr};
-    if(!empty) {
-        _ReduceToSize(_max_size - entry_size);
-        empty = _lru_index.empty();
-    }
-    if(!empty) {
+    _ReduceToSize(_max_size - entry_size);
+    if(!_lru_index.empty()) {
         _lru_head->prev = node;
         _lru_head.swap(node->next);
     } else {
@@ -97,43 +77,64 @@ bool SimpleLRU::PutIfAbsent(const std::string &key, const std::string &value) {
     _lru_head.reset(node);
     _lru_index.insert({std::cref(_lru_head->key), std::ref(*node)});
     _size += entry_size;
-
     return true;
 }
 
-// See MapBasedGlobalLockImpl.h
-bool SimpleLRU::Set(const std::string &key, const std::string &value) {
-    if(key.size() + value.size() > _max_size) {
+bool SimpleLRU::_Set(std::reference_wrapper<lru_node> ref, const std::string &value) {
+    std::size_t val_size = value.size();
+    lru_node& node = ref.get();
+    if(node.key.size() + val_size > _max_size) {
         return false;
     }
-    if(_lru_index.empty()) {
-        return false;
-    }
-    auto found = _lru_index.find(key);
-    if(found == _lru_index.end()) {
-        return false;
-    }
-    std::reference_wrapper<lru_node> ref = found->second;
-    std::size_t size_inc = value.size() - ref.get().value.size();
+    std::size_t size_inc = val_size - node.value.size();
     _MoveToHead(ref);
     _ReduceToSize(_max_size - size_inc);
-    ref.get().value = value;
+    node.value = value;
     _size += size_inc;
     return true;
 }
 
+void SimpleLRU::_Get(std::reference_wrapper<lru_node> ref, std::string &value) {
+    _MoveToHead(ref);
+    value = ref.get().value;
+}
+
 // See MapBasedGlobalLockImpl.h
-bool SimpleLRU::Delete(const std::string &key) {
-    if(_lru_index.empty()) {
+bool SimpleLRU::Put(const std::string &key, const std::string &value) {
+    auto found = _lru_index.find(key);
+    if(found != _lru_index.end()) {
+        return _Set(found->second, value);
+    }
+    return _PutNew(key, value);
+}
+
+// See MapBasedGlobalLockImpl.h
+bool SimpleLRU::PutIfAbsent(const std::string &key, const std::string &value) {
+    if(_lru_index.find(key) != _lru_index.end()) {
         return false;
     }
+    return _PutNew(key, value);
+}
+
+// See MapBasedGlobalLockImpl.h
+bool SimpleLRU::Set(const std::string &key, const std::string &value) {
+    auto found = _lru_index.find(key);
+    if(found == _lru_index.end()) {
+        return false;
+    }
+    return _Set(found->second, value);
+}
+
+// See MapBasedGlobalLockImpl.h
+bool SimpleLRU::Delete(const std::string &key) {
     auto found = _lru_index.find(key);
     if(found == _lru_index.end()) {
         return false;
     }
     std::reference_wrapper<lru_node> ref = found->second;
-    std::size_t del_size = key.size() + ref.get().value.size();
-    lru_node* tmp = &ref.get();
+    lru_node& node = ref.get();
+    std::size_t del_size = key.size() + node.value.size();
+    lru_node* tmp = &node;
     if(_lru_head.get() == tmp) {
         _lru_head.swap(tmp->next);
         _lru_head->prev = nullptr;
@@ -155,16 +156,11 @@ bool SimpleLRU::Delete(const std::string &key) {
 
 // See MapBasedGlobalLockImpl.h
 bool SimpleLRU::Get(const std::string &key, std::string &value) {
-    if(_lru_index.empty()) {
-        return false;
-    }
     auto found = _lru_index.find(key);
     if(found == _lru_index.end()) {
         return false;
     }
-    std::reference_wrapper<lru_node> ref = found->second;
-    _MoveToHead(ref);
-    value = ref.get().value;
+    _Get(found->second, value);
     return true;
 }
 
