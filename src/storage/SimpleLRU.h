@@ -17,11 +17,10 @@ namespace Backend {
  */
 class SimpleLRU : public Afina::Storage {
 public:
-    SimpleLRU(size_t max_size = 1024)
-        : _max_size(max_size), _size(0) {}
+    SimpleLRU(size_t max_size = 1024) : _max_size(max_size), _size(0) {}
 
     ~SimpleLRU() override {
-        if(!_lru_index.empty()) {
+        if (!_lru_index.empty()) {
             _Clear();
         };
     }
@@ -42,19 +41,20 @@ public:
     bool Get(const std::string &key, std::string &value) override;
 
     // For debugging: prints index and list data for manual integrity checking
-    void _PrintDebug(std::ostream& os);
+    void _PrintDebug(std::ostream &os);
+
 private:
     // LRU cache node
     struct lru_node {
         ~lru_node() {
-            if(next) {
+            if (next) {
                 // all lru_node objects are allocated with "new"
                 delete next.release();
             }
         }
         const std::string key;
         std::string value;
-        lru_node* prev;
+        lru_node *prev;
         std::unique_ptr<lru_node> next;
     };
     using lru_node = struct lru_node;
@@ -92,10 +92,11 @@ private:
     //
     // List owns all nodes
     std::unique_ptr<lru_node> _lru_head;
-    lru_node* _lru_tail;
+    lru_node *_lru_tail;
 
     // Index of nodes from list above, allows fast random access to elements by lru_node#key
-    std::map<std::reference_wrapper<const std::string>, std::reference_wrapper<lru_node>, std::less<std::string>> _lru_index;
+    std::map<std::reference_wrapper<const std::string>, std::reference_wrapper<lru_node>, std::less<std::string>>
+        _lru_index;
 };
 
 } // namespace Backend

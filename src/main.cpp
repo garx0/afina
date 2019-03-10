@@ -78,21 +78,21 @@ public:
 
         // Step 3: configure parameters for server->Start(...)
         workers = 1; // default
-        if(options.count("workers") > 0) {
+        if (options.count("workers") > 0) {
             workers = options["workers"].as<uint32_t>();
         }
 
         acceptors = 1; // default
-        if(options.count("acceptors") > 0) {
+        if (options.count("acceptors") > 0) {
             acceptors = options["acceptors"].as<uint32_t>();
         }
 
         timeout = std::chrono::seconds{5}; // default
-        if(options.count("timeout") > 0) {
+        if (options.count("timeout") > 0) {
             timeout = std::chrono::milliseconds{options["timeout"].as<uint32_t>()};
         }
         port = 8080; // default
-        if(options.count("port") > 0) {
+        if (options.count("port") > 0) {
             port = options["port"].as<uint16_t>();
         }
     }
@@ -107,8 +107,8 @@ public:
         storage->Start();
 
         // DONE: configure network service
-        log->warn("Start network on {}, acceptors={}, workers={}, timeout={} ms",
-                  port, acceptors, workers, timeout.count());
+        log->warn("Start network on {}, acceptors={}, workers={}, timeout={} ms", port, acceptors, workers,
+                  timeout.count());
         server->Start(port, acceptors, workers, timeout);
     }
 
@@ -155,7 +155,8 @@ int main(int argc, char **argv) {
         options.add_options()("s,storage", "Type of storage service to use", cxxopts::value<std::string>());
         options.add_options()("n,network", "Type of network service to use", cxxopts::value<std::string>());
         options.add_options()("w,workers", "Max number of workers (def=1)", cxxopts::value<uint32_t>());
-        options.add_options()("a,acceptors", "Max number of acceptable connections (def=1)", cxxopts::value<uint32_t>());
+        options.add_options()("a,acceptors", "Max number of acceptable connections (def=1)",
+                              cxxopts::value<uint32_t>());
         options.add_options()("t,timeout", "Timeout in ms (def=5000)", cxxopts::value<uint32_t>());
         options.add_options()("p,port", "Server port (def=8080)", cxxopts::value<uint16_t>());
         options.add_options()("h,help", "Print usage info");

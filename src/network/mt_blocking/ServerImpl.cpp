@@ -84,7 +84,7 @@ void ServerImpl::Stop() {
     running.store(false);
     {
         std::unique_lock<std::mutex> workers_lock(_workers_m);
-        while(_cur_n_workers > 0) {
+        while (_cur_n_workers > 0) {
             _all_finished.wait(workers_lock);
         }
         shutdown(_server_socket, SHUT_RDWR);
@@ -96,7 +96,7 @@ void ServerImpl::Join() {
     running.store(false); // not sure if this call should be here in the method
     {
         std::unique_lock<std::mutex> workers_lock(_workers_m);
-        while(_cur_n_workers > 0) {
+        while (_cur_n_workers > 0) {
             _all_finished.wait(workers_lock);
         }
         assert(_thread.joinable());
@@ -172,7 +172,7 @@ void ServerImpl::_WorkerFunc(int client_socket) {
 
                     std::string result;
                     command_to_execute->Execute(*pStorage, argument_for_command, result);
-//                    sleep(1); //DEBUG!!
+                    //                    sleep(1); //DEBUG!!
 
                     // Send response
                     result += "\r\n";
@@ -186,7 +186,7 @@ void ServerImpl::_WorkerFunc(int client_socket) {
                     parser.Reset();
                 }
             } // /while (readed_bytes > 0)
-        } // /while ((readed_bytes = read(...)) > 0)
+        }     // /while ((readed_bytes = read(...)) > 0)
 
         if (readed_bytes == 0) {
             _logger->debug("Connection closed");
@@ -205,9 +205,9 @@ void ServerImpl::_WorkerFunc(int client_socket) {
 
     { // lock
         std::unique_lock<std::mutex> workers_lock(_workers_m);
-//        assert(_cur_n_workers > 0);
+        //        assert(_cur_n_workers > 0);
         _cur_n_workers -= 1;
-        if(_cur_n_workers == 0) {
+        if (_cur_n_workers == 0) {
             _all_finished.notify_all(); // ... or one ?
         }
         // We are done with this connection
@@ -253,8 +253,8 @@ void ServerImpl::OnRun() {
         // Start new thread and process data from/to connection
         { // lock
             std::unique_lock<std::mutex> workers_lock(_workers_m);
-//            assert(_cur_n_workers <= _max_workers); // DEBUG
-            if(_cur_n_workers < _max_workers) {
+            //            assert(_cur_n_workers <= _max_workers); // DEBUG
+            if (_cur_n_workers < _max_workers) {
                 _cur_n_workers += 1;
                 _logger->debug("Starting thread for {}", client_socket);
                 std::thread worker(&ServerImpl::_WorkerFunc, this, client_socket);
@@ -269,7 +269,7 @@ void ServerImpl::OnRun() {
                 close(client_socket);
             }
         } // unlock
-    } // /while (running)
+    }     // /while (running)
 
     // Cleanup on exit...
     _logger->warn("Network stopped");
