@@ -3,6 +3,8 @@
 
 #include <atomic>
 #include <thread>
+#include <mutex>
+#include <condition_variable>
 
 #include <afina/network/Server.h>
 
@@ -24,7 +26,7 @@ public:
     ~ServerImpl();
 
     // See Server.h
-    void Start(uint16_t port, uint32_t, uint32_t) override;
+    void Start(uint16_t port, uint32_t, uint32_t, std::chrono::microseconds) override;
 
     // See Server.h
     void Stop() override;
@@ -37,6 +39,8 @@ protected:
      * Method is running in the connection acceptor thread
      */
     void OnRun();
+
+    void _WorkerFunc(int client_socket);
 
 private:
     // Logger instance
@@ -52,6 +56,14 @@ private:
 
     // Thread to run network on
     std::thread _thread;
+
+    // Current number of workers running
+    std::mutex _workers_m;
+    uint32_t _cur_n_workers;
+    uint32_t _max_workers;
+
+    // ... for Join() and Stop() ... V maybe rename
+    std::condition_variable _all_finished;
 };
 
 } // namespace MTblocking

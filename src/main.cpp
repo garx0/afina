@@ -39,7 +39,7 @@ public:
         console.color = true;
 
         Logging::Logger &logger = logConfig->loggers["root"];
-        logger.level = Logging::Logger::Level::WARNING;
+        logger.level = Logging::Logger::Level::WARNING; // for debug, toggle: WARNING/DEBUG
         logger.appenders.push_back("console");
         logger.format = "[%H:%M:%S %z] [thread %t] [%n] [%l] %v";
         logService.reset(new Logging::ServiceImpl(logConfig));
@@ -75,6 +75,26 @@ public:
         } else {
             throw std::runtime_error("Unknown network type");
         }
+
+        // Step 3: configure parameters for server->Start(...)
+        workers = 1; // default
+        if(options.count("workers") > 0) {
+            workers = options["workers"].as<uint32_t>();
+        }
+
+        acceptors = 1; // default
+        if(options.count("acceptors") > 0) {
+            acceptors = options["acceptors"].as<uint32_t>();
+        }
+
+        timeout = std::chrono::seconds{5}; // default
+        if(options.count("timeout") > 0) {
+            timeout = std::chrono::milliseconds{options["timeout"].as<uint32_t>()};
+        }
+        port = 8080; // default
+        if(options.count("port") > 0) {
+            port = options["port"].as<uint16_t>();
+        }
     }
 
     // Start services in correct order
@@ -86,10 +106,10 @@ public:
         log->warn("Start storage");
         storage->Start();
 
-        // TODO: configure network service
-        const uint16_t port = 8080;
-        log->warn("Start network on {}", port);
-        server->Start(port, 2, 2);
+        // DONE: configure network service
+        log->warn("Start network on {}, acceptors={}, workers={}, timeout={} ms",
+                  port, acceptors, workers, timeout.count());
+        server->Start(port, acceptors, workers, timeout);
     }
 
     // Stop services in correct order
@@ -109,6 +129,11 @@ private:
 
     std::shared_ptr<Afina::Storage> storage;
     std::shared_ptr<Afina::Network::Server> server;
+
+    uint32_t workers;
+    uint32_t acceptors;
+    std::chrono::milliseconds timeout;
+    uint16_t port;
 };
 
 // Signal set that to notify application about time to stop
@@ -125,10 +150,14 @@ int main(int argc, char **argv) {
     // Command line arguments parsing
     cxxopts::Options options("afina", "Simple memory caching server");
     try {
-        // TODO: use custom cxxopts::value to print options possible values in help message
+        // DONE?: use custom cxxopts::value to print options possible values in help message
         // and simplify validation below
         options.add_options()("s,storage", "Type of storage service to use", cxxopts::value<std::string>());
         options.add_options()("n,network", "Type of network service to use", cxxopts::value<std::string>());
+        options.add_options()("w,workers", "Max number of workers (def=1)", cxxopts::value<uint32_t>());
+        options.add_options()("a,acceptors", "Max number of acceptable connections (def=1)", cxxopts::value<uint32_t>());
+        options.add_options()("t,timeout", "Timeout in ms (def=5000)", cxxopts::value<uint32_t>());
+        options.add_options()("p,port", "Server port (def=8080)", cxxopts::value<uint16_t>());
         options.add_options()("h,help", "Print usage info");
         options.parse(argc, argv);
 

@@ -27,7 +27,7 @@ public:
     ~ServerImpl();
 
     // See Server.h
-    void Start(uint16_t port, uint32_t acceptors, uint32_t workers) override;
+    void Start(uint16_t port, uint32_t acceptors, uint32_t workers, std::chrono::microseconds) override;
 
     // See Server.h
     void Stop() override;

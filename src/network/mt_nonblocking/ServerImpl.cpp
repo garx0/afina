@@ -36,7 +36,8 @@ ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Loggi
 ServerImpl::~ServerImpl() {}
 
 // See Server.h
-void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers) {
+void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers,
+                       std::chrono::microseconds = std::chrono::microseconds{5000000}) {
     _logger = pLogging->select("network");
     _logger->info("Start network service");
 

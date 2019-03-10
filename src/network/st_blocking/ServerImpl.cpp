@@ -34,7 +34,8 @@ ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Loggi
 ServerImpl::~ServerImpl() {}
 
 // See Server.h
-void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
+void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers,
+                       std::chrono::microseconds timeout = std::chrono::seconds{5}) {
     _logger = pLogging->select("network");
     _logger->info("Start st_blocking network service");
 
@@ -101,6 +102,7 @@ void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
         throw std::runtime_error("Socket listen() failed");
     }
 
+    _timeout = timeout;
     running.store(true);
     _thread = std::thread(&ServerImpl::OnRun, this);
 }
@@ -156,9 +158,10 @@ void ServerImpl::OnRun() {
         // Configure read timeout
         {
             struct timeval tv;
-            tv.tv_sec = 5; // TODO: make it configurable
-            tv.tv_usec = 0;
+            tv.tv_sec = _timeout.count() / 1000000; // made it configurable
+            tv.tv_usec = _timeout.count() % 1000000;
             setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
+            _logger->debug("set timeout: {} s {} us", tv.tv_sec, tv.tv_usec); // DEBUG
         }
 
         // Process new connection:

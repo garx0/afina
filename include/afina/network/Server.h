@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <vector>
+#include <chrono>
 
 namespace Afina {
 class Storage;
@@ -26,7 +27,7 @@ public:
      * listen on the given interface/port pair to process  incomming
      * data in workers number of threads
      */
-    virtual void Start(uint16_t port, uint32_t acceptors = 1, uint32_t workers = 1) = 0;
+    virtual void Start(uint16_t port, uint32_t acceptors = 1, uint32_t workers = 1, std::chrono::microseconds timeout = std::chrono::microseconds{5000000}) = 0;
 
     /**
      * Signal all worker threads that server is going to shutdown. After method returns
@@ -55,6 +56,7 @@ protected:
      * Logging service to be used in order to report application progress
      */
     std::shared_ptr<Afina::Logging::Service> pLogging;
+    std::chrono::microseconds _timeout;
 };
 
 } // namespace Network

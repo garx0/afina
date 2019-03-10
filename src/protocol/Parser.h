@@ -23,9 +23,9 @@ public:
     Parser() { Reset(); }
     /**
      * Push given string into parser input. Method returns true if it was a command parsed out
-     * from comulative input. In a such case method Build will return new command
+     * from cumulative input. In a such case method Build will return new command
      *
-     * @param input sttring to be added to the parsed input
+     * @param input string to be added to the parsed input
      * @param parsed output parameter tells how many bytes was consumed from the string
      * @return true if command has been parsed out
      */
@@ -33,7 +33,7 @@ public:
 
     /**
      * Push given string into parser input. Method returns true if it was a command parsed out
-     * from comulative input. In a such case method Build will return new command
+     * from cumulative input. In a such case method Build will return new command
      *
      * @param input string to be added to the parsed input
      * @param size number of bytes in the input buffer that could be read
