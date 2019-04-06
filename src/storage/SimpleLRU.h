@@ -19,11 +19,7 @@ class SimpleLRU : public Afina::Storage {
 public:
     SimpleLRU(size_t max_size = 1024) : _max_size(max_size), _size(0) {}
 
-    ~SimpleLRU() override {
-        if (!_lru_index.empty()) {
-            _Clear();
-        };
-    }
+    ~SimpleLRU() override { _ReduceToSize(0); }
 
     // Implements Afina::Storage interface
     bool Put(const std::string &key, const std::string &value) override;
@@ -46,21 +42,12 @@ public:
 private:
     // LRU cache node
     struct lru_node {
-        ~lru_node() {
-            if (next) {
-                // all lru_node objects are allocated with "new"
-                delete next.release();
-            }
-        }
         const std::string key;
         std::string value;
         lru_node *prev;
         std::unique_ptr<lru_node> next;
     };
     using lru_node = struct lru_node;
-
-    //
-    void _Clear();
 
     // Put new node without searching for key
     bool _PutNew(const std::string &key, const std::string &value);

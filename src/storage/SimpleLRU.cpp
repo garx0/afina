@@ -4,18 +4,14 @@
 namespace Afina {
 namespace Backend {
 
-void SimpleLRU::_Clear() {
-    _lru_index.clear();
-    delete _lru_head.release();
-    _lru_tail = nullptr;
-    _size = 0;
-}
+// void SimpleLRU::_Clear() {
+//    _lru_index.clear();
+//    delete _lru_head.release();
+//    _lru_tail = nullptr;
+//    _size = 0;
+//}
 
 void SimpleLRU::_ReduceToSize(std::size_t size) {
-    if (size == 0) {
-        _Clear();
-        return;
-    }
     while (_size > size) {
         _DeleteFromTail();
     }
@@ -27,12 +23,12 @@ void SimpleLRU::_DeleteFromTail() {
     lru_node *new_tail = tmp->prev;
     const std::string &del_key = tmp->key;
     auto found = _lru_index.find(del_key);
+    _lru_index.erase(found);
     if (_lru_tail == _lru_head.get()) {
         delete _lru_head.release();
     } else {
         delete tmp->prev->next.release();
     }
-    _lru_index.erase(found);
     _size -= del_size;
     _lru_tail = new_tail;
     if (_lru_tail != nullptr) {
@@ -137,6 +133,7 @@ bool SimpleLRU::Delete(const std::string &key) {
     lru_node &node = ref.get();
     std::size_t del_size = key.size() + node.value.size();
     lru_node *tmp = &node;
+    _lru_index.erase(found);
     if (_lru_head.get() == tmp) {
         _lru_head.swap(tmp->next);
         _lru_head->prev = nullptr;
@@ -151,7 +148,6 @@ bool SimpleLRU::Delete(const std::string &key) {
         tmp->prev->next.swap(tmp->next);
     }
     delete tmp->next.release();
-    _lru_index.erase(found);
     _size -= del_size;
     return true;
 }
