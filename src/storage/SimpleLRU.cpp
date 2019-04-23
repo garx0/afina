@@ -25,9 +25,9 @@ void SimpleLRU::_DeleteFromTail() {
     auto found = _lru_index.find(del_key);
     _lru_index.erase(found);
     if (_lru_tail == _lru_head.get()) {
-        delete _lru_head.release();
+        _lru_head.reset();
     } else {
-        delete tmp->prev->next.release();
+        tmp->prev->next.reset();
     }
     _size -= del_size;
     _lru_tail = new_tail;
@@ -147,7 +147,7 @@ bool SimpleLRU::Delete(const std::string &key) {
         tmp->next->prev = tmp->prev;
         tmp->prev->next.swap(tmp->next);
     }
-    delete tmp->next.release();
+    tmp->next.reset();
     _size -= del_size;
     return true;
 }

@@ -4,6 +4,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
+#include <set>
 #include <thread>
 
 #include <afina/network/Server.h>
@@ -58,9 +59,14 @@ private:
     std::thread _thread;
 
     // Current number of workers running
-    std::mutex _workers_m;
     uint32_t _cur_n_workers;
     uint32_t _max_workers;
+
+    // Currently used client sockets
+    std::set<int> _sockets;
+
+    // One lock for both _cur_n_workers and _sockets
+    std::mutex _workers_m;
 
     // ... for Join() and Stop() ... V maybe rename
     std::condition_variable _all_finished;

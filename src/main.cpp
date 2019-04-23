@@ -77,12 +77,16 @@ public:
         }
 
         // Step 3: configure parameters for server->Start(...)
-        workers = 1; // default
+        workers = 3; // default
         if (options.count("workers") > 0) {
             workers = options["workers"].as<uint32_t>();
         }
 
-        acceptors = 1; // default
+        if (network_type == "mt_block") {
+            acceptors = workers; // default
+        } else {
+            acceptors = 3; // default
+        }
         if (options.count("acceptors") > 0) {
             acceptors = options["acceptors"].as<uint32_t>();
         }

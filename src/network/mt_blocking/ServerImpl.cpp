@@ -82,27 +82,20 @@ void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers,
 // See Server.h
 void ServerImpl::Stop() {
     running.store(false);
+    shutdown(_server_socket, SHUT_RDWR);
     {
-        std::unique_lock<std::mutex> workers_lock(_workers_m);
-        while (_cur_n_workers > 0) {
-            _all_finished.wait(workers_lock);
+        std::unique_lock<std::mutex> sockets_lock(_workers_m);
+        for (auto &socket : _sockets) {
+            shutdown(socket, SHUT_RD); // to send response about executed cmds
         }
-        shutdown(_server_socket, SHUT_RDWR);
     }
 }
 
 // See Server.h
 void ServerImpl::Join() {
-    running.store(false); // not sure if this call should be here in the method
-    {
-        std::unique_lock<std::mutex> workers_lock(_workers_m);
-        while (_cur_n_workers > 0) {
-            _all_finished.wait(workers_lock);
-        }
-        assert(_thread.joinable());
-        _thread.join();
-        close(_server_socket);
-    }
+    assert(_thread.joinable());
+    _thread.join();
+    close(_server_socket);
 }
 
 void ServerImpl::_WorkerFunc(int client_socket) {
@@ -131,7 +124,9 @@ void ServerImpl::_WorkerFunc(int client_socket) {
             // for example:
             // - read#0: [<command1 start>]
             // - read#1: [<command1 end> <argument> <command2> <argument for command 2> <command3> ... ]
-            while (readed_bytes > 0) {
+            // If we have, for example, many commands read, and server stopped,
+            //   we'll finish executing current command and no more
+            while (readed_bytes > 0 && running.load()) {
                 _logger->debug("Process {} bytes", readed_bytes);
                 // There is no command yet
                 if (!command_to_execute) {
@@ -171,8 +166,8 @@ void ServerImpl::_WorkerFunc(int client_socket) {
                     _logger->debug("Start command execution");
 
                     std::string result;
+                    //                    sleep(2); // DEBUG
                     command_to_execute->Execute(*pStorage, argument_for_command, result);
-                    //                    sleep(1); //DEBUG!!
 
                     // Send response
                     result += "\r\n";
@@ -203,15 +198,15 @@ void ServerImpl::_WorkerFunc(int client_socket) {
         }
     }
 
+    // We are done with this connection
+    close(client_socket);
     { // lock
         std::unique_lock<std::mutex> workers_lock(_workers_m);
-        //        assert(_cur_n_workers > 0);
+        _sockets.erase(client_socket);
         _cur_n_workers -= 1;
-        if (_cur_n_workers == 0) {
-            _all_finished.notify_all(); // ... or one ?
+        if (_cur_n_workers == 0 && !running.load()) {
+            _all_finished.notify_all();
         }
-        // We are done with this connection
-        close(client_socket);
     } // unlock
 }
 
@@ -253,13 +248,13 @@ void ServerImpl::OnRun() {
         // Start new thread and process data from/to connection
         { // lock
             std::unique_lock<std::mutex> workers_lock(_workers_m);
-            //            assert(_cur_n_workers <= _max_workers); // DEBUG
             if (_cur_n_workers < _max_workers) {
                 _cur_n_workers += 1;
                 _logger->debug("Starting thread for {}", client_socket);
+                _sockets.insert(client_socket);
                 std::thread worker(&ServerImpl::_WorkerFunc, this, client_socket);
                 worker.detach();
-                _logger->debug("Detached thread for {}", client_socket);
+                //                _logger->debug("Detached thread for {}", client_socket);
             } else {
                 static const std::string msg = "Connection limit exceeded\r\n";
                 if (send(client_socket, msg.data(), msg.size(), 0) <= 0) {
@@ -270,7 +265,14 @@ void ServerImpl::OnRun() {
             }
         } // unlock
     }     // /while (running)
-
+    // Waiting for currently executing commands to execute and workers to finish...
+    {
+        std::unique_lock<std::mutex> workers_lock(_workers_m);
+        while (_cur_n_workers > 0) {
+            _all_finished.wait(workers_lock);
+        }
+        assert(_sockets.empty()); // DEBUG
+    }
     // Cleanup on exit...
     _logger->warn("Network stopped");
 }
