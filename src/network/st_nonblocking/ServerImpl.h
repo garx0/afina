@@ -17,6 +17,9 @@ namespace STnonblock {
 // Forward declaration, see Worker.h
 class Worker;
 
+// Forward declaration, see Connection.h (my)
+class Connection;
+
 /**
  * # Network resource manager implementation
  * Epoll based server
@@ -40,6 +43,8 @@ protected:
     void OnNewConnection(int);
 
 private:
+    friend class Connection;
+
     // logger to use
     std::shared_ptr<spdlog::logger> _logger;
 
