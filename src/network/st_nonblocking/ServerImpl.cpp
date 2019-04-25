@@ -65,6 +65,12 @@ void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers,
         throw std::runtime_error("Socket setsockopt() failed: " + std::string(strerror(errno)));
     }
 
+    // Don't know if it's correct, just tried to solve issue with bind error when restarting server immediately
+    if (setsockopt(_server_socket, SOL_SOCKET, (SO_REUSEADDR), &opts, sizeof(opts)) == -1) {
+        close(_server_socket);
+        throw std::runtime_error("Socket setsockopt() failed: " + std::string(strerror(errno)));
+    }
+
     if (bind(_server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
         close(_server_socket);
         throw std::runtime_error("Socket bind() failed: " + std::string(strerror(errno)));
@@ -92,12 +98,16 @@ void ServerImpl::Stop() {
     if (eventfd_write(_event_fd, 1)) {
         throw std::runtime_error("Failed to wakeup workers");
     }
+    for (auto &pc : connections) {
+        pc->OnStop();
+    }
 }
 
 // See Server.h
 void ServerImpl::Join() {
     // Wait for work to be complete
     _work_thread.join();
+    close(_server_socket);
 }
 
 // See ServerImpl.h
@@ -124,7 +134,7 @@ void ServerImpl::OnRun() {
 
     bool run = true;
     std::array<struct epoll_event, 64> mod_list;
-    while (run) {
+    while (run || !connections.empty()) {
         int nmod = epoll_wait(epoll_descr, &mod_list[0], mod_list.size(), -1);
         _logger->debug("Acceptor wokeup: {} events", nmod);
 
@@ -135,7 +145,7 @@ void ServerImpl::OnRun() {
                 run = false;
                 continue;
             } else if (current_event.data.fd == _server_socket) {
-                OnNewConnection(epoll_descr);
+                OnNewConnection(epoll_descr, run);
                 continue;
             }
 
@@ -143,18 +153,15 @@ void ServerImpl::OnRun() {
             Connection *pc = static_cast<Connection *>(current_event.data.ptr);
 
             auto old_mask = pc->_event.events;
+
             if ((current_event.events & EPOLLERR) || (current_event.events & EPOLLHUP)) {
                 pc->OnError();
+            } else if (current_event.events & EPOLLOUT) {
+                pc->DoWrite();
             } else if (current_event.events & EPOLLRDHUP) {
                 pc->OnClose();
-            } else {
-                // Depends on what connection wants...
-                if (current_event.events & EPOLLIN) {
-                    pc->DoRead();
-                }
-                if (current_event.events & EPOLLOUT) {
-                    pc->DoWrite();
-                }
+            } else if (current_event.events & EPOLLIN) {
+                pc->DoRead();
             }
 
             // Is it alive?
@@ -163,26 +170,27 @@ void ServerImpl::OnRun() {
                     _logger->error("Failed to delete connection from epoll");
                 }
 
-                close(pc->_socket);
                 pc->OnClose();
-
+                close(pc->_socket);
+                connections.erase(pc);
                 delete pc;
             } else if (pc->_event.events != old_mask) {
                 if (epoll_ctl(epoll_descr, EPOLL_CTL_MOD, pc->_socket, &pc->_event)) {
                     _logger->error("Failed to change connection event mask");
 
-                    close(pc->_socket);
                     pc->OnClose();
-
+                    close(pc->_socket);
+                    connections.erase(pc);
                     delete pc;
                 }
             }
         }
     }
+    assert(connections.empty());
     _logger->warn("Acceptor stopped");
 }
 
-void ServerImpl::OnNewConnection(int epoll_descr) {
+void ServerImpl::OnNewConnection(int epoll_descr, bool to_accept) {
     for (;;) {
         struct sockaddr in_addr;
         socklen_t in_len;
@@ -190,8 +198,10 @@ void ServerImpl::OnNewConnection(int epoll_descr) {
         // No need to make these sockets non blocking since accept4() takes care of it.
         in_len = sizeof in_addr;
         int infd = accept4(_server_socket, &in_addr, &in_len, SOCK_NONBLOCK | SOCK_CLOEXEC);
+        _logger->debug("accepted some socket");
         if (infd == -1) {
             if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
+                _logger->debug("processed all incoming connections");
                 break; // We have processed all incoming connections.
             } else {
                 _logger->error("Failed to accept socket");
@@ -207,8 +217,14 @@ void ServerImpl::OnNewConnection(int epoll_descr) {
             _logger->info("Accepted connection on descriptor {} (host={}, port={})\n", infd, hbuf, sbuf);
         }
 
+        if (!to_accept) {
+            close(infd);
+            break;
+        }
+
         // Register the new FD to be monitored by epoll.
         Connection *pc = new Connection(infd, pStorage, _logger);
+        connections.insert(pc);
         if (pc == nullptr) {
             throw std::runtime_error("Failed to allocate connection");
         }
@@ -218,6 +234,8 @@ void ServerImpl::OnNewConnection(int epoll_descr) {
         if (pc->isAlive()) {
             if (epoll_ctl(epoll_descr, EPOLL_CTL_ADD, pc->_socket, &pc->_event)) {
                 pc->OnError();
+                close(pc->_socket);
+                connections.erase(pc);
                 delete pc;
             }
         }

@@ -10,36 +10,54 @@ namespace STnonblock {
 void Connection::Start() {
     //    std::cout << "Start" << std::endl;
     _is_alive = true;
-    _failed_to_write = false;
+    _shutdown = false;
+    _readed_bytes = -1;
+    _event.events = EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
 }
 
 // See Connection.h
 void Connection::OnError() {
     //    std::cout << "OnError" << std::endl;
     _is_alive = false;
+    _shutdown = true;
+    _event.events = EPOLLOUT | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
+    shutdown(_socket, SHUT_RD);
 }
 
 // See Connection.h
 void Connection::OnClose() {
     //    std::cout << "OnClose" << std::endl;
     _is_alive = false;
+    _shutdown = true;
+    _event.events = EPOLLOUT | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
+    shutdown(_socket, SHUT_RD);
+}
+
+// See Connection.h
+void Connection::OnStop() {
+    //    std::cout << "OnStop" << std::endl;
+    _shutdown = true;
+    _event.events = EPOLLOUT | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
+    shutdown(_socket, SHUT_RD);
 }
 
 // See Connection.h
 void Connection::DoRead() {
     //    std::cout << "DoRead" << std::endl;
+    // логика:
     // читаем из сокета один раз.
-    // если у нас после этого есть целые команды с аргументами:
-    //   execut'им все целые команды, ставим интерес на райт.
+    // если получили в итоге хотя бы одну целую команду с аргументами:
+    //     выполняем все полученные целые команды с аргументами
+    //     и не читаем ничего нового пока не отправим клиенту ответы обо всех выполненных командах
     // иначе:
-    //     оставляем интерес на рид
-    // возможно в обоих случаях надо будет еще что-то поменять в epoll_ctl
+    //    ждем след. раза чтобы прочитать еще
     try {
         _written_bytes = _wbuf_len = 0;
         _readed_bytes = read(_socket, _rbuffer, sizeof(_rbuffer));
         if (_readed_bytes == 0) {
             _logger->debug("Connection closed");
-            // V когда закрыть сокет?
+            OnClose();
+            return;
         } else if (_readed_bytes < 0) {
             throw std::runtime_error(std::string(strerror(errno)));
         }
@@ -51,7 +69,7 @@ void Connection::DoRead() {
         // - read#1: [<command1 end> <argument> <command2> <argument for command 2> <command3> ... ]
         // If we have, for example, many commands read, and server stopped,
         // we'll finish executing current command and no more
-        while (_readed_bytes > 0) {
+        while (_readed_bytes > 0 && !_shutdown) {
             _logger->debug("Process {} bytes", _readed_bytes);
             // There is no command yet
             if (!_cmd_to_exec) {
@@ -91,20 +109,9 @@ void Connection::DoRead() {
                 _logger->debug("Start command execution");
 
                 std::string result;
-                //                    sleep(2); // DEBUG
+                sleep(2); // DEBUG
                 _cmd_to_exec->Execute(*pStorage, _arg_for_cmd, result);
-                std::size_t result_size = result.size();
-                assert(_wbuf_len + result_size + 2 < sizeof(_wbuffer));
-                std::copy(result.begin(), result.end(), _wbuffer + _wbuf_len);
-                const char result_end[] = "\r\n";
-                assert(sizeof(result_end) == 3);
-                std::memcpy(_wbuffer + _wbuf_len + result_size, result_end, 2);
-                _wbuf_len += result_size + 2;
-                // Send response
-                //                result += "\r\n";
-                //                if (send(_socket, result.data(), result.size(), 0) <= 0) {
-                //                    throw std::runtime_error("Failed to send response");
-                //                }
+                _AppendResponse(result);
 
                 // Prepare for the next command
                 _cmd_to_exec.reset();
@@ -113,30 +120,14 @@ void Connection::DoRead() {
             }
         } // /while (_readed_bytes > 0)
         if (_wbuf_len) {
-            _event.events = EPOLLOUT;
+            _event.events = EPOLLOUT | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
         }
     } catch (std::runtime_error &ex) {
-        _is_alive = false;
         _logger->error("Failed to process connection on descriptor {}: {}", _socket, ex.what());
-        std::string msg = "SERVER_ERROR ";
-        msg += ex.what();
-        std::size_t msg_size = msg.size();
-        assert(_wbuf_len + msg_size + 2 < sizeof(_wbuffer));
-        std::copy(msg.begin(), msg.end(), _wbuffer + _wbuf_len);
-        const char msg_end[] = "\r\n";
-        assert(sizeof(msg_end) == 3);
-        std::memcpy(_wbuffer + _wbuf_len + msg_size, msg_end, 2);
-        _wbuf_len += msg_size + 2;
-        // V как то сообщить что пора закрывать сокет после того как опустошим _wbuffer
-        //        if (send(_socket, msg.data(), msg.size(), 0) <= 0) {
-        //            _logger->error("Failed to write response to client: {}", strerror(errno));
-        //        }
+        _cmd_to_exec.reset();
+        _arg_for_cmd.resize(0);
+        _parser.Reset();
     }
-
-    // если случился эксепшн, мы сначала должны послать в сокет сообщение об ошибке, затем закрыть этот сокет.
-    // возможно, для этого isalive и пригодится (и/или придется порождать bool поле в Connection)
-    // We are done with this connection
-    //    close(_socket);
 }
 
 // See Connection.h
@@ -145,38 +136,27 @@ void Connection::DoWrite() {
     try {
         _written_bytes = write(_socket, _wbuffer + _written_bytes, _wbuf_len);
         if (_written_bytes == -1 && errno != EINTR) {
-            if (_failed_to_write) {
-                // We failed to write message about previous writing failure
-                _logger->error("Failed to write response to client: {}", strerror(errno));
-            } else {
-                // We failed to write command result
-                _failed_to_write = true;
-                throw std::runtime_error(std::string(strerror(errno)));
-            }
+            shutdown(_socket, SHUT_RDWR);
+            throw std::runtime_error(std::string(strerror(errno)));
         } else if (_written_bytes > 0) {
             _wbuf_len -= _written_bytes;
             if (_wbuf_len == 0) {
-                _event.events = EPOLLIN;
+                _event.events = EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
             }
         }
     } catch (std::runtime_error &ex) {
-        _is_alive = false;
         _logger->error("Failed to process connection on descriptor {}: {}", _socket, ex.what());
-        if (_failed_to_write) {
-            // Exception was caused by failure of writing of command result
-            _written_bytes = _wbuf_len = 0;
-        }
-        // Exception wasn't caused by a writing failure
-        std::string msg = "SERVER_ERROR ";
-        msg += ex.what();
-        std::size_t msg_size = msg.size();
-        assert(_wbuf_len + msg_size + 2 < sizeof(_wbuffer));
-        std::copy(msg.begin(), msg.end(), _wbuffer + _wbuf_len);
-        const char msg_end[] = "\r\n";
-        assert(sizeof(msg_end) == 3);
-        std::memcpy(_wbuffer + _wbuf_len + msg_size, msg_end, 2);
-        _wbuf_len += msg_size + 2;
     }
+}
+
+// See Connection.h
+void Connection::_AppendResponse(std::string s) {
+    std::size_t size = s.size();
+    assert(_wbuf_len + size + 2 < sizeof(_wbuffer));
+    std::copy(s.begin(), s.end(), _wbuffer + _wbuf_len);
+    static const char end[] = "\r\n";
+    std::memcpy(_wbuffer + _wbuf_len + size, end, 2);
+    _wbuf_len += size + 2;
 }
 
 } // namespace STnonblock

@@ -1,8 +1,9 @@
 #ifndef AFINA_NETWORK_ST_NONBLOCKING_SERVER_H
 #define AFINA_NETWORK_ST_NONBLOCKING_SERVER_H
 
+#include <set>
 #include <thread>
-#include <vector>
+//#include <vector>
 
 #include <afina/network/Server.h>
 
@@ -40,10 +41,11 @@ public:
 
 protected:
     void OnRun();
-    void OnNewConnection(int);
+    void OnNewConnection(int epoll_descr, bool to_accept = true);
 
 private:
     friend class Connection;
+    std::set<Connection *> connections;
 
     // logger to use
     std::shared_ptr<spdlog::logger> _logger;

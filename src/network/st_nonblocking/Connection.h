@@ -53,6 +53,7 @@ protected:
 
     void OnError();
     void OnClose();
+    void OnStop(); // shutdown RD but don't declare "not alive"
     void DoRead();
     void DoWrite();
 
@@ -63,10 +64,7 @@ private:
     struct epoll_event _event;
 
     bool _is_alive;
-
-    // If failed writing to socket.
-    // For avoiding endless loop of writing fails and writing of messages about writing fails
-    bool _failed_to_write;
+    bool _shutdown;
 
     std::shared_ptr<spdlog::logger> _logger;
 
@@ -80,6 +78,9 @@ private:
     int _written_bytes;
     char _wbuffer[4096];
     std::size_t _wbuf_len;
+
+    // append (s + "\r\n") to _wbuffer
+    void _AppendResponse(std::string s);
 };
 
 } // namespace STnonblock
