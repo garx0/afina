@@ -109,7 +109,7 @@ void Connection::DoRead() {
                 _logger->debug("Start command execution");
 
                 std::string result;
-                sleep(2); // DEBUG
+                //                sleep(2); // DEBUG
                 _cmd_to_exec->Execute(*pStorage, _arg_for_cmd, result);
                 _AppendResponse(result);
 
