@@ -119,14 +119,15 @@ void Connection::DoRead() {
                 _parser.Reset();
             }
         } // /while (_readed_bytes > 0)
-        if (_wbuf_len) {
-            _event.events = EPOLLOUT | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
-        }
     } catch (std::runtime_error &ex) {
         _logger->error("Failed to process connection on descriptor {}: {}", _socket, ex.what());
+        _AppendResponse(std::string("ERROR"));
         _cmd_to_exec.reset();
         _arg_for_cmd.resize(0);
         _parser.Reset();
+    }
+    if (_wbuf_len) {
+        _event.events = EPOLLOUT | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
     }
 }
 
