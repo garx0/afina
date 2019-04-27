@@ -98,9 +98,7 @@ void ServerImpl::Stop() {
     if (eventfd_write(_event_fd, 1)) {
         throw std::runtime_error("Failed to wakeup workers");
     }
-    for (auto &pc : connections) {
-        pc->OnStop();
-    }
+    // The rest of operations will be done by worker after he find this epoll event
 }
 
 // See Server.h
@@ -132,6 +130,7 @@ void ServerImpl::OnRun() {
         throw std::runtime_error("Failed to add file descriptor to epoll");
     }
 
+    bool stopped = false;
     bool run = true;
     std::array<struct epoll_event, 64> mod_list;
     while (run || !connections.empty()) {
@@ -141,11 +140,20 @@ void ServerImpl::OnRun() {
         for (int i = 0; i < nmod; i++) {
             struct epoll_event &current_event = mod_list[i];
             if (current_event.data.fd == _event_fd) {
-                _logger->debug("Break acceptor due to stop signal");
-                run = false;
+                if (run) {
+                    _logger->debug("Break acceptor due to stop signal");
+                    _logger->warn("Acceptor stopped");
+                    run = false;
+                    for (auto &pc : connections) {
+                        pc->OnClose();
+                    }
+                    shutdown(_server_socket, SHUT_RDWR);
+                }
                 continue;
             } else if (current_event.data.fd == _server_socket) {
-                OnNewConnection(epoll_descr, run);
+                if (run && (current_event.events & EPOLLIN)) {
+                    OnNewConnection(epoll_descr);
+                }
                 continue;
             }
 
@@ -156,20 +164,24 @@ void ServerImpl::OnRun() {
 
             if ((current_event.events & EPOLLERR) || (current_event.events & EPOLLHUP)) {
                 pc->OnError();
-            } else if (current_event.events & EPOLLOUT) {
-                pc->DoWrite();
+            } else if ((current_event.events & EPOLLIN) || (current_event.events & EPOLLOUT)) {
+                if (current_event.events & EPOLLOUT) {
+                    pc->DoWrite();
+                }
+                if (current_event.events & EPOLLIN) {
+                    pc->DoRead();
+                }
             } else if (current_event.events & EPOLLRDHUP) {
                 pc->OnClose();
-            } else if (current_event.events & EPOLLIN) {
-                pc->DoRead();
             }
 
             // Is it alive?
-            if (!pc->isAlive()) {
+            if (!pc->isAlive() && !(pc->_event.events & EPOLLOUT)) {
                 if (epoll_ctl(epoll_descr, EPOLL_CTL_DEL, pc->_socket, &pc->_event)) {
                     _logger->error("Failed to delete connection from epoll");
                 }
 
+                _logger->info("Closing connection on descriptor {}", pc->_socket);
                 pc->OnClose();
                 close(pc->_socket);
                 connections.erase(pc);
@@ -187,7 +199,6 @@ void ServerImpl::OnRun() {
         }
     }
     assert(connections.empty());
-    _logger->warn("Acceptor stopped");
 }
 
 void ServerImpl::OnNewConnection(int epoll_descr, bool to_accept) {
@@ -233,6 +244,7 @@ void ServerImpl::OnNewConnection(int epoll_descr, bool to_accept) {
         pc->Start();
         if (pc->isAlive()) {
             if (epoll_ctl(epoll_descr, EPOLL_CTL_ADD, pc->_socket, &pc->_event)) {
+                _logger->error("Failed to add file descriptor {} to epoll", pc->_socket);
                 pc->OnError();
                 close(pc->_socket);
                 connections.erase(pc);

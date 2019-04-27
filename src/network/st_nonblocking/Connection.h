@@ -2,6 +2,7 @@
 #define AFINA_NETWORK_ST_NONBLOCKING_CONNECTION_H
 
 #include <cstring>
+#include <deque>
 #include <memory>
 #include <string>
 
@@ -51,9 +52,9 @@ protected:
      * Logging service to be used in order to report application progress
      */
 
-    void OnError();
-    void OnClose();
-    void OnStop(); // shutdown RD but don't declare "not alive"
+    void OnError(bool shut_wr = false);
+    void OnClose(bool shut_wr = false);
+    //    void OnStop(); // shutdown RD but don't declare "not alive"
     void DoRead();
     void DoWrite();
 
@@ -64,7 +65,6 @@ private:
     struct epoll_event _event;
 
     bool _is_alive;
-    bool _shutdown;
 
     std::shared_ptr<spdlog::logger> _logger;
 
@@ -75,12 +75,11 @@ private:
     std::string _arg_for_cmd;
     std::unique_ptr<Execute::Command> _cmd_to_exec;
 
-    int _written_bytes;
-    char _wbuffer[4096];
-    std::size_t _wbuf_len;
+    std::deque<std::string> _responses;
+    std::size_t _write_pos;
 
     // append (s + "\r\n") to _wbuffer
-    void _AppendResponse(std::string s);
+    //    void _AppendResponse(std::string s);
 };
 
 } // namespace STnonblock

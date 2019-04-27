@@ -124,9 +124,7 @@ void ServerImpl::_WorkerFunc(int client_socket) {
             // for example:
             // - read#0: [<command1 start>]
             // - read#1: [<command1 end> <argument> <command2> <argument for command 2> <command3> ... ]
-            // If we have, for example, many commands read, and server stopped,
-            //   we'll finish executing current command and no more
-            while (readed_bytes > 0 && running.load()) {
+            while (readed_bytes > 0) {
                 _logger->debug("Process {} bytes", readed_bytes);
                 // There is no command yet
                 if (!command_to_execute) {

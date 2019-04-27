@@ -1,44 +1,43 @@
 #include "Connection.h"
 
 #include <iostream>
+#include <sys/uio.h>
 
 namespace Afina {
 namespace Network {
 namespace STnonblock {
 
+// V сделать без define потом
+#define READ_EVENT (EPOLLIN | EPOLLRDHUP)
+#define WRITE_EVENT (EPOLLOUT | EPOLLRDHUP)
+#define NO_EVENT (EPOLLRDHUP)
+
 // See Connection.h
 void Connection::Start() {
     //    std::cout << "Start" << std::endl;
     _is_alive = true;
-    _shutdown = false;
     _readed_bytes = -1;
-    _event.events = EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
+    _write_pos = 0;
+    _event.events = READ_EVENT;
 }
 
 // See Connection.h
-void Connection::OnError() {
+void Connection::OnError(bool shut_wr) {
     //    std::cout << "OnError" << std::endl;
-    _is_alive = false;
-    _shutdown = true;
-    _event.events = EPOLLOUT | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
-    shutdown(_socket, SHUT_RD);
+    OnClose(shut_wr);
 }
 
 // See Connection.h
-void Connection::OnClose() {
+void Connection::OnClose(bool shut_wr) {
     //    std::cout << "OnClose" << std::endl;
     _is_alive = false;
-    _shutdown = true;
-    _event.events = EPOLLOUT | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
-    shutdown(_socket, SHUT_RD);
-}
-
-// See Connection.h
-void Connection::OnStop() {
-    //    std::cout << "OnStop" << std::endl;
-    _shutdown = true;
-    _event.events = EPOLLOUT | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
-    shutdown(_socket, SHUT_RD);
+    if (shut_wr) {
+        shutdown(_socket, SHUT_RDWR);
+        _event.events = NO_EVENT;
+    } else {
+        shutdown(_socket, SHUT_RD);
+        _event.events = _event.events & EPOLLOUT ? WRITE_EVENT : NO_EVENT;
+    }
 }
 
 // See Connection.h
@@ -52,7 +51,6 @@ void Connection::DoRead() {
     // иначе:
     //    ждем след. раза чтобы прочитать еще
     try {
-        _written_bytes = _wbuf_len = 0;
         _readed_bytes = read(_socket, _rbuffer, sizeof(_rbuffer));
         if (_readed_bytes == 0) {
             _logger->debug("Connection closed");
@@ -67,9 +65,7 @@ void Connection::DoRead() {
         // for example:
         // - read#0: [<command1 start>]
         // - read#1: [<command1 end> <argument> <command2> <argument for command 2> <command3> ... ]
-        // If we have, for example, many commands read, and server stopped,
-        // we'll finish executing current command and no more
-        while (_readed_bytes > 0 && !_shutdown) {
+        while (_readed_bytes > 0) {
             _logger->debug("Process {} bytes", _readed_bytes);
             // There is no command yet
             if (!_cmd_to_exec) {
@@ -111,7 +107,8 @@ void Connection::DoRead() {
                 std::string result;
                 //                sleep(2); // DEBUG
                 _cmd_to_exec->Execute(*pStorage, _arg_for_cmd, result);
-                _AppendResponse(result);
+                result += "\r\n";
+                _responses.emplace_back(std::move(result));
 
                 // Prepare for the next command
                 _cmd_to_exec.reset();
@@ -121,43 +118,57 @@ void Connection::DoRead() {
         } // /while (_readed_bytes > 0)
     } catch (std::runtime_error &ex) {
         _logger->error("Failed to process connection on descriptor {}: {}", _socket, ex.what());
-        _AppendResponse(std::string("ERROR"));
-        _cmd_to_exec.reset();
-        _arg_for_cmd.resize(0);
-        _parser.Reset();
+        std::string msg = "ERROR ";
+        msg += ex.what();
+        msg += "\r\n";
+        // to pass all itests, replace std::move(msg) by "ERROR"
+        _responses.emplace_back(std::move(msg));
+        OnError();
     }
-    if (_wbuf_len) {
-        _event.events = EPOLLOUT | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
+    if (!_responses.empty()) {
+        _event.events |= WRITE_EVENT;
     }
 }
 
 // See Connection.h
 void Connection::DoWrite() {
     //    std::cout << "DoWrite" << std::endl;
+    assert(!_responses.empty());
+    std::size_t q_size = _responses.size();
+    iovec *q_iov = new iovec[q_size];
     try {
-        _written_bytes = write(_socket, _wbuffer + _written_bytes, _wbuf_len);
+        std::size_t i = 0;
+        for (auto it = _responses.begin(); it != _responses.end(); ++it, ++i) {
+            q_iov[i].iov_base = (void *)(it->data());
+            q_iov[i].iov_len = it->size();
+        }
+        q_iov[0].iov_base = static_cast<char *>(q_iov[0].iov_base) + _write_pos;
+        q_iov[0].iov_len -= _write_pos;
+        int _written_bytes = writev(_socket, q_iov, q_size);
         if (_written_bytes == -1 && errno != EINTR) {
-            shutdown(_socket, SHUT_RDWR);
+            OnError(true);
             throw std::runtime_error(std::string(strerror(errno)));
         } else if (_written_bytes > 0) {
-            _wbuf_len -= _written_bytes;
-            if (_wbuf_len == 0) {
-                _event.events = EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR;
+            for (i = 0; i < q_size; ++i) {
+                int len = q_iov[i].iov_len;
+                if (_written_bytes >= len) {
+                    _written_bytes -= len;
+                    _responses.pop_front();
+                    _write_pos = 0;
+                } else {
+                    break;
+                }
             }
+            _write_pos += _written_bytes;
         }
     } catch (std::runtime_error &ex) {
         _logger->error("Failed to process connection on descriptor {}: {}", _socket, ex.what());
     }
-}
+    delete[] q_iov;
 
-// See Connection.h
-void Connection::_AppendResponse(std::string s) {
-    std::size_t size = s.size();
-    assert(_wbuf_len + size + 2 < sizeof(_wbuffer));
-    std::copy(s.begin(), s.end(), _wbuffer + _wbuf_len);
-    static const char end[] = "\r\n";
-    std::memcpy(_wbuffer + _wbuf_len + size, end, 2);
-    _wbuf_len += size + 2;
+    if (_responses.empty()) {
+        _event.events = READ_EVENT;
+    }
 }
 
 } // namespace STnonblock
